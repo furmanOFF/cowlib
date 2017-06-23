@@ -51,7 +51,11 @@ parse_status_line(<< H, T, U, " ", Rest/bits >>, Version)
 	Status = (H - $0) * 100 + (T - $0) * 10 + (U - $0),
 	{Pos, _} = binary:match(Rest, <<"\r">>),
 	<< StatusStr:Pos/binary, "\r\n", Rest2/bits >> = Rest,
-	{Version, Status, StatusStr, Rest2}.
+	{Version, Status, StatusStr, Rest2};
+parse_status_line(<< H, T, U, "\r\n", Rest/bits >>, Version)
+		when $0 =< H, H =< $9, $0 =< T, T =< $9, $0 =< U, U =< $9 ->
+	Status = (H - $0) * 100 + (T - $0) * 10 + (U - $0),
+	{Version, Status, <<>>, Rest}.
 
 -ifdef(TEST).
 parse_status_line_test_() ->
@@ -72,7 +76,6 @@ parse_status_line_error_test_() ->
 	Tests = [
 		<<>>,
 		<<"HTTP/1.1">>,
-		<<"HTTP/1.1 200\r\n">>,
 		<<"HTTP/1.1 200 OK">>,
 		<<"HTTP/1.1 200 OK\r">>,
 		<<"HTTP/1.1 200 OK\n">>,
