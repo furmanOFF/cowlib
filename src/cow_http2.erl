@@ -97,7 +97,7 @@ parse(<< Len:24, 0:8, _:4, 0:1, _:2, FlagEndStream:1, _:1, StreamID:31, Data:Len
 %% Padding.
 parse(<< Len0:24, 0:8, _:4, 1:1, _:2, FlagEndStream:1, _:1, StreamID:31, PadLen:8, Rest0/bits >>)
 		when byte_size(Rest0) >= Len0 - 1 ->
-	Len = Len0 - PadLen,
+	Len = Len0 - PadLen - 1,
 	case Rest0 of
 		<< Data:Len/binary, 0:PadLen/unit:8, Rest/bits >> ->
 			{ok, {data, StreamID, parse_fin(FlagEndStream), Data}, Rest};
@@ -240,8 +240,8 @@ parse(<< 4:24, 8:8, _:9, 0:31, _:1, 0:31, _/bits >>) ->
 	{connection_error, protocol_error, 'WINDOW_UPDATE frames MUST have a non-zero increment. (RFC7540 6.9)'};
 parse(<< 4:24, 8:8, _:9, 0:31, _:1, Increment:31, Rest/bits >>) ->
 	{ok, {window_update, Increment}, Rest};
-parse(<< 4:24, 8:8, _:9, StreamID:31, _:1, 0:31, _/bits >>) ->
-	{stream_error, StreamID, protocol_error, 'WINDOW_UPDATE frames MUST have a non-zero increment. (RFC7540 6.9)'};
+parse(<< 4:24, 8:8, _:9, StreamID:31, _:1, 0:31, Rest/bits >>) ->
+	{stream_error, StreamID, protocol_error, 'WINDOW_UPDATE frames MUST have a non-zero increment. (RFC7540 6.9)', Rest};
 parse(<< 4:24, 8:8, _:9, StreamID:31, _:1, Increment:31, Rest/bits >>) ->
 	{ok, {window_update, StreamID, Increment}, Rest};
 parse(<< Len:24, 8:8, _/bits >>) when Len =/= 4->
@@ -345,7 +345,6 @@ parse_settings_payload(<< _:48, Rest/bits >>, Len, Settings) ->
 
 %% Building.
 
-%% @todo Check size and create multiple frames if needed.
 data(StreamID, IsFin, Data) ->
 	[data_header(StreamID, IsFin, iolist_size(Data)), Data].
 
@@ -368,13 +367,21 @@ rst_stream(StreamID, Reason) ->
 	ErrorCode = error_code(Reason),
 	<< 4:24, 3:8, 0:9, StreamID:31, ErrorCode:32 >>.
 
-%% @todo Actually implement it. :-)
-settings(#{}) ->
-	<< 0:24, 4:8, 0:40 >>.
+settings(Settings) ->
+	Payload = settings_payload(Settings),
+	Len = iolist_size(Payload),
+	[<< Len:24, 4:8, 0:40 >>, Payload].
 
-%% @todo Actually implement it. :-)
-settings_payload(#{}) ->
-	<<>>.
+settings_payload(Settings) ->
+	[case Key of
+		header_table_size -> <<1:16, Value:32>>;
+		enable_push when Value -> <<2:16, 1:32>>;
+		enable_push -> <<2:16, 0:32>>;
+		max_concurrent_streams -> <<3:16, Value:32>>;
+		initial_window_size -> <<4:16, Value:32>>;
+		max_frame_size -> <<5:16, Value:32>>;
+		max_header_list_size -> <<6:16, Value:32>>
+	end || {Key, Value} <- maps:to_list(Settings)].
 
 settings_ack() ->
 	<< 0:24, 4:8, 1:8, 0:32 >>.
